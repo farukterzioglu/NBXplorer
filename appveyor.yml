@@ -19,8 +19,15 @@ branches:
 #    environment configuration    #
 #---------------------------------#
     
-image: Visual Studio 2017
-clone_folder: c:\projects\nbxplorer
+image: Ubuntu
+
+services:
+- docker
+
+build:
+  verbosity: minimal
+
+clone_folder: /home/appveyor/projects/
 
 clone_depth: 1
 
