@@ -35,8 +35,9 @@ init:
 #---------------------------------#
 before_build:
 
-- cmd: where DockerCli
-- cmd: ls C:\Progra~1\Docker
+- cmd: where docker
+- ps: Write-host "`nSwitch to linux engine"  -foregroundcolor green
+- ps: Switch-DockerLinux
 - docker version && docker-compose version
 - cmd: run-docker.cmd
 
