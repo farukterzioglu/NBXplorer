@@ -36,7 +36,7 @@ init:
 before_build:
 
 - ps: Write-host "`nSwitch to linux engine"  -foregroundcolor green
-- ps: Switch-DockerLinux
+- cmd: docker-switch-linux
 - docker version && docker-compose version
 - cmd: run-docker.cmd
 
