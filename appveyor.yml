@@ -37,7 +37,7 @@ before_build:
 
 - cmd: where docker
 - cmd: set DOCKER_PATH="C:\/Program /Files\Docker\docker.exe"
-- cmd: $env:DOCKER_PATH -SwitchLinuxEngine'
+- cmd: $env:DOCKER_PATH -SwitchLinuxEngine
 - docker version && docker-compose version
 - cmd: run-docker.cmd
 
