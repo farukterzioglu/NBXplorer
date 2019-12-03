@@ -35,10 +35,10 @@ init:
 #---------------------------------#
 before_build:
 
-- cmd: echo %programfiles%
-- cmd: echo [$env:ProgramFiles]
 - cmd: where docker
-# - cmd: [$env:ProgramFiles]\Docker\docker.exe -SwitchLinuxEngine
+- ps: Write-host "`nSwitch to linux engine"  -foregroundcolor green
+# - cmd: C:\Program Files\Docker\docker.exe -SwitchLinuxEngine
+- cmd: %programfiles%\Docker\docker.exe -SwitchLinuxEngine
 - docker version && docker-compose version
 - cmd: run-docker.cmd
 
