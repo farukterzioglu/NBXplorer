@@ -36,9 +36,9 @@ init:
 before_build:
 
 - cmd: echo %programfiles%
-- cmd: echo [$Env:ProgramFiles]
+- cmd: echo [$env:ProgramFiles]
 - cmd: where docker
-- cmd: [$Env:ProgramFiles]\Docker\docker.exe -SwitchLinuxEngine
+# - cmd: [$env:ProgramFiles]\Docker\docker.exe -SwitchLinuxEngine
 - docker version && docker-compose version
 - cmd: run-docker.cmd
 
