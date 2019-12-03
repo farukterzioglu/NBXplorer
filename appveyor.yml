@@ -37,7 +37,8 @@ before_build:
 
 - cmd: where docker
 - ps: Write-host "`nSwitch to linux engine"  -foregroundcolor green
-- cmd: C:\Program Files\Docker\docker.exe -SwitchLinuxEngine
+# - cmd: C:\Program Files\Docker\docker.exe -SwitchLinuxEngine
+- ps: Invoke-Expression "& 'C:\Program Files\Docker\docker.exe -SwitchLinuxEngine'"
 - docker version && docker-compose version
 - cmd: run-docker.cmd
 
