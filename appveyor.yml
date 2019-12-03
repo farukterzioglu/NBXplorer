@@ -35,11 +35,12 @@ init:
 #---------------------------------#
 before_build:
 
--ps : | 
-      Write-host "`nSwitch to linux engine"  -foregroundcolor green
+-ps : |
+      Write-host "STARTED docker-compose"  -foregroundcolor "magenta"
+       
       Switch-DockerLinux
-- cmd: docker version && docker-compose version
-- cmd: where docker
+      docker version && docker-compose version
+    
 - cmd: run-docker.cmd
 
 - ps: |
