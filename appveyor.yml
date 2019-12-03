@@ -35,7 +35,8 @@ init:
 #---------------------------------#
 before_build:
 
-dockerpath: where docker
+dockerpath: 
+- where docker
 
 - ps: |
       Write-Host "Docker path: [$env:dockerpath]" -foregroundcolor "magenta"
