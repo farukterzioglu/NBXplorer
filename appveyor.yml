@@ -36,6 +36,7 @@ init:
 before_build:
 
 dockerpath: where docker
+
 - cmd: where docker
 - ps: Write-host "`nSwitch to linux engine"  -foregroundcolor green
 - cmd: $env:dockerpath -SwitchLinuxEngine'
