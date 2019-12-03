@@ -19,15 +19,8 @@ branches:
 #    environment configuration    #
 #---------------------------------#
     
-image: Ubuntu
-
-services:
-- docker
-
-build:
-  verbosity: minimal
-
-clone_folder: /home/appveyor/projects/
+image: Visual Studio 2019
+clone_folder: c:\projects\nbxplorer
 
 clone_depth: 1
 
@@ -42,7 +35,10 @@ init:
 #---------------------------------#
 before_build:
 
-- docker version && docker-compose version
+-ps : | 
+      Write-host "`nSwitch to linux engine"  -foregroundcolor green
+      Switch-DockerLinux
+- cmd: docker version && docker-compose version
 - cmd: where docker
 - cmd: run-docker.cmd
 
