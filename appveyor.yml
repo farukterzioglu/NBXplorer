@@ -37,7 +37,9 @@ before_build:
 
 dockerpath: where docker
 
-- cmd: where docker
+- ps: |
+      Write-Host "Docker path: [$env:dockerpath]" -foregroundcolor "magenta"
+
 - ps: Write-host "`nSwitch to linux engine"  -foregroundcolor green
 - cmd: $env:dockerpath -SwitchLinuxEngine'
 - docker version && docker-compose version
