@@ -35,8 +35,8 @@ init:
 #---------------------------------#
 before_build:
 
-- cmd: where docker
-- cmd: C:\Progra~1\Docker\DockerCli.exe -SwitchLinuxEngine
+- cmd: where DockerCli
+- cmd: ls C:\Progra~1\Docker
 - docker version && docker-compose version
 - cmd: run-docker.cmd
 
