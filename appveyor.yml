@@ -35,7 +35,6 @@ init:
 #---------------------------------#
 before_build:
 
-
 - ps: Write-Host "[$env:configuration] STARTED RabbitMq" -foregroundcolor "magenta"
 - cmd: where docker
 - cmd: docker version && docker-compose version
