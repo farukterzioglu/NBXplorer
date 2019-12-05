@@ -830,7 +830,7 @@ namespace NBXplorer.Controllers
 			};
 
 			var param = JsonConvert.SerializeObject(jobject);
-			var result = waiter.RPC.SendCommand("getaddressbalance", JObject.Parse(param));
+			var result = await waiter.RPC.SendCommandAsync("getaddressbalance", JObject.Parse(param));
 			return Json(result);
 		}
 
