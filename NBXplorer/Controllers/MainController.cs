@@ -815,6 +815,26 @@ namespace NBXplorer.Controllers
 		}
 
 		[HttpGet]
+		[Route("cryptos/{cryptoCode}/rpc/addresses/{addresses}/balances")]
+		public async Task<IActionResult> GetBalance(string cryptoCode,
+			[ModelBinder(BinderType = typeof(CryptoAddressesModelBinder))]
+			List<BitcoinAddress> addresses)
+		{
+			var network = GetNetwork(cryptoCode, true);
+			var waiter = Waiters.GetWaiter(network);
+
+			var jsonModel = addresses.Select(x => x.ToString()).ToArray();
+			var jobject = new
+			{
+				addresses = jsonModel
+			};
+
+			var param = JsonConvert.SerializeObject(jobject);
+			var result = waiter.RPC.SendCommand("getaddressbalance", JObject.Parse(param));
+			return Json(result);
+		}
+
+		[HttpGet]
 		[Route("cryptos/{cryptoCode}/derivations/{derivationScheme}/utxos")]
 		[Route("cryptos/{cryptoCode}/addresses/{address}/utxos")]
 		public async Task<IActionResult> GetUTXOs(
