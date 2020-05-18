@@ -12,6 +12,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using NBitcoin.RPC;
 
 namespace NBXplorer.Controllers
 {
@@ -36,7 +37,8 @@ namespace NBXplorer.Controllers
 			var txBuilder = request.Seed is int s ? network.NBitcoinNetwork.CreateTransactionBuilder(s)
 												: network.NBitcoinNetwork.CreateTransactionBuilder();
 
-			if (Waiters.GetWaiter(network).NetworkInfo?.GetRelayFee() is FeeRate feeRate)
+			var waiter = Waiters.GetWaiter(network);
+			if (waiter.NetworkInfo?.GetRelayFee() is FeeRate feeRate)
 			{
 				txBuilder.StandardTransactionPolicy.MinRelayTxFee = feeRate;
 			}
@@ -45,7 +47,46 @@ namespace NBXplorer.Controllers
 			if (request.LockTime is LockTime lockTime)
 			{
 				txBuilder.SetLockTime(lockTime);
-				txBuilder.OptInRBF = true;
+			}
+			// Discourage fee sniping.
+			//
+			// For a large miner the value of the transactions in the best block and
+			// the mempool can exceed the cost of deliberately attempting to mine two
+			// blocks to orphan the current best block. By setting nLockTime such that
+			// only the next block can include the transaction, we discourage this
+			// practice as the height restricted and limited blocksize gives miners
+			// considering fee sniping fewer options for pulling off this attack.
+			//
+			// A simple way to think about this is from the wallet's point of view we
+			// always want the blockchain to move forward. By setting nLockTime this
+			// way we're basically making the statement that we only want this
+			// transaction to appear in the next block; we don't want to potentially
+			// encourage reorgs by allowing transactions to appear at lower heights
+			// than the next block in forks of the best chain.
+			//
+			// Of course, the subsidy is high enough, and transaction volume low
+			// enough, that fee sniping isn't a problem yet, but by implementing a fix
+			// now we ensure code won't be written that makes assumptions about
+			// nLockTime that preclude a fix later.
+			else if (!(request.DiscourageFeeSniping is false))
+			{
+				if (waiter.State is BitcoinDWaiterState.Ready)
+				{
+					int blockHeight = ChainProvider.GetChain(network).Height;
+					// Secondly occasionally randomly pick a nLockTime even further back, so
+					// that transactions that are delayed after signing for whatever reason,
+					// e.g. high-latency mix networks and some CoinJoin implementations, have
+					// better privacy.
+					if (txBuilder.ShuffleRandom.Next(0, 10) == 0)
+					{
+						blockHeight = Math.Max(0, blockHeight - txBuilder.ShuffleRandom.Next(0, 100));
+					}
+					txBuilder.SetLockTime(new LockTime(blockHeight));
+				}
+				else
+				{
+					txBuilder.SetLockTime(new LockTime(0));
+				}
 			}
 			var utxos = (await GetUTXOs(network.CryptoCode, strategy, null)).As<UTXOChanges>().GetUnspentCoins(request.MinConfirmations);
 			var availableCoinsByOutpoint = utxos.ToDictionary(o => o.Outpoint);
@@ -175,16 +216,16 @@ namespace NBXplorer.Controllers
 				tx.Version = v;
 			psbt = txBuilder.CreatePSBTFrom(tx, false, SigHash.All);
 
-			await UpdatePSBTCore(new UpdatePSBTRequest()
+			var update = new UpdatePSBTRequest()
 			{
 				DerivationScheme = strategy,
 				PSBT = psbt,
 				RebaseKeyPaths = request.RebaseKeyPaths
-			}, network);
-
+			};
+			await UpdatePSBTCore(update, network);
 			var resp = new CreatePSBTResponse()
 			{
-				PSBT = psbt,
+				PSBT = update.PSBT,
 				ChangeAddress = hasChange ? change.ScriptPubKey.GetDestinationAddress(network.NBitcoinNetwork) : null
 			};
 			return Json(resp, network.JsonSerializerSettings);
@@ -211,9 +252,9 @@ namespace NBXplorer.Controllers
 			var rpc = Waiters.GetWaiter(network);
 			await UpdateUTXO(update, repo, rpc);
 
-			if (update.DerivationScheme is DerivationStrategyBase)
+			if (update.DerivationScheme is DerivationStrategyBase derivationScheme)
 			{
-				foreach (var extpub in update.DerivationScheme.GetExtPubKeys().Select(e => e.GetWif(network.NBitcoinNetwork)))
+				foreach (var extpub in derivationScheme.GetExtPubKeys().Select(e => e.GetWif(network.NBitcoinNetwork)))
 				{
 					update.PSBT.GlobalXPubs.AddOrReplace(extpub, new RootedKeyPath(extpub, new KeyPath()));
 				}
@@ -226,6 +267,8 @@ namespace NBXplorer.Controllers
 			HashSet<PubKey> rebased = new HashSet<PubKey>();
 			if (update.RebaseKeyPaths != null)
 			{
+				if (update.RebaseKeyPaths.Any(r => r.AccountKey is null))
+					throw new NBXplorerException(new NBXplorerError(400, "missing-parameter", "rebaseKeyPaths[].accountKey is missing"));
 				foreach (var rebase in update.RebaseKeyPaths.Where(r => rebased.Add(r.AccountKey.GetPublicKey())))
 				{
 					if (rebase.AccountKeyPath == null)
@@ -234,12 +277,16 @@ namespace NBXplorer.Controllers
 				}
 			}
 
-			var accountKeyPath = await repo.GetMetadata<RootedKeyPath>(new DerivationSchemeTrackedSource(update.DerivationScheme), WellknownMetadataKeys.AccountKeyPath);
-			if (accountKeyPath != null)
+			if (update.DerivationScheme is DerivationStrategyBase derivationScheme2)
 			{
-				foreach (var pubkey in update.DerivationScheme.GetExtPubKeys().Where(p => rebased.Add(p.PubKey)))
+				var accountKeyPath = await repo.GetMetadata<RootedKeyPath>(
+					new DerivationSchemeTrackedSource(derivationScheme2), WellknownMetadataKeys.AccountKeyPath);
+				if (accountKeyPath != null)
 				{
-					update.PSBT.RebaseKeyPaths(pubkey, accountKeyPath);
+					foreach (var pubkey in derivationScheme2.GetExtPubKeys().Where(p => rebased.Add(p.PubKey)))
+					{
+						update.PSBT.RebaseKeyPaths(pubkey, accountKeyPath);
+					}
 				}
 			}
 		}
@@ -271,7 +318,7 @@ namespace NBXplorer.Controllers
 			}
 
 			List<Script> redeems = new List<Script>();
-			foreach (var c in update.PSBT.Outputs.OfType<PSBTCoin>().Concat(update.PSBT.Inputs))
+			foreach (var c in update.PSBT.Outputs.OfType<PSBTCoin>().Concat(update.PSBT.Inputs.Where(o => !o.IsFinalized())))
 			{
 				var script = c.GetCoin()?.ScriptPubKey;
 				if (script != null &&
@@ -305,20 +352,39 @@ namespace NBXplorer.Controllers
 
 		private async Task UpdateUTXO(UpdatePSBTRequest update, Repository repo, BitcoinDWaiter rpc)
 		{
-			AnnotatedTransactionCollection txs = null;
-			// First, we check for data in our history
-			foreach (var input in update.PSBT.Inputs.Where(NeedUTXO))
+			if (rpc?.RPCAvailable is true)
 			{
-				txs = txs ?? await GetAnnotatedTransactions(repo, ChainProvider.GetChain(repo.Network), new DerivationSchemeTrackedSource(update.DerivationScheme));
-				if (txs.GetByTxId(input.PrevOut.Hash) is AnnotatedTransaction tx)
+				try
 				{
-					if (!tx.Record.Key.IsPruned)
+					update.PSBT = await rpc.RPC.UTXOUpdatePSBT(update.PSBT);
+				}
+				// Best effort
+				catch (RPCException ex) when (ex.RPCCode == RPCErrorCode.RPC_METHOD_NOT_FOUND)
+				{
+				}
+				catch
+				{
+				}
+			}
+
+			if (update.DerivationScheme is DerivationStrategyBase derivationScheme)
+			{
+				AnnotatedTransactionCollection txs = null;
+				// First, we check for data in our history
+				foreach (var input in update.PSBT.Inputs.Where(NeedUTXO))
+				{
+					txs = txs ?? await GetAnnotatedTransactions(repo, ChainProvider.GetChain(repo.Network), new DerivationSchemeTrackedSource(derivationScheme));
+					if (txs.GetByTxId(input.PrevOut.Hash) is AnnotatedTransaction tx)
 					{
-						input.NonWitnessUtxo = tx.Record.Transaction;
-					}
-					else
-					{
-						input.WitnessUtxo = tx.Record.ReceivedCoins.FirstOrDefault(c => c.Outpoint.N == input.Index)?.TxOut;
+						if (!tx.Record.Key.IsPruned)
+						{
+							input.NonWitnessUtxo = tx.Record.Transaction;
+						}
+						else
+						{
+							input.WitnessUtxo = tx.Record.ReceivedCoins.FirstOrDefault(c => c.Outpoint.N == input.Index)
+								?.TxOut;
+						}
 					}
 				}
 			}

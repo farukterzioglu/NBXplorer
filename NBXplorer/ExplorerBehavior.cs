@@ -225,7 +225,7 @@ namespace NBXplorer
 			AttachedNode.StateChanged -= AttachedNode_StateChanged;
 			AttachedNode.MessageReceived -= AttachedNode_MessageReceived;
 			_Cts.Cancel();
-			_Timer.Dispose();
+			_Timer?.Dispose();
 			_Timer = null;
 		}
 		private void AttachedNode_MessageReceived(Node node, IncomingMessage message)
@@ -303,9 +303,8 @@ namespace NBXplorer
 						Height = slimBlockHeader.Height,
 						PreviousBlockHash = slimBlockHeader.Previous
 					};
-					var saving = Repository.SaveEvent(blockEvent);
+					await Repository.SaveEvent(blockEvent);
 					_EventAggregator.Publish(blockEvent);
-					await saving;
 				}
 			}
 			catch (ObjectDisposedException)
