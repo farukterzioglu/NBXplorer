@@ -8,6 +8,7 @@ namespace NBXplorer
 		public NBXplorerNetworkProvider(NetworkType networkType)
 		{
 			NetworkType = networkType;
+			InitArgoneum(networkType);
 			InitBitcoin(networkType);
 			InitBitcore(networkType);
 			InitLitecoin(networkType);
@@ -27,6 +28,7 @@ namespace NBXplorer
 			InitColossus(networkType);
 			InitChaincoin(networkType);
 			InitLiquid(networkType);
+			InitQtum(networkType);
 			foreach (var chain in _Networks.Values)
 			{
 				chain.DerivationStrategyFactory ??= chain.CreateStrategyFactory();

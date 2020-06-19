@@ -13,6 +13,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using NBitcoin.RPC;
+using NBXplorer.Analytics;
 
 namespace NBXplorer.Controllers
 {
@@ -33,9 +34,69 @@ namespace NBXplorer.Controllers
 			CreatePSBTRequest request = ParseJObject<CreatePSBTRequest>(body, network);
 			if (strategy == null)
 				throw new ArgumentNullException(nameof(strategy));
+
 			var repo = RepositoryProvider.GetRepository(network);
 			var txBuilder = request.Seed is int s ? network.NBitcoinNetwork.CreateTransactionBuilder(s)
 												: network.NBitcoinNetwork.CreateTransactionBuilder();
+
+			CreatePSBTSuggestions suggestions = null;
+			if (!(request.DisableFingerprintRandomization is true) &&
+				fingerprintService.GetDistribution(network) is FingerprintDistribution distribution)
+			{
+				suggestions ??= new CreatePSBTSuggestions();
+				var known = new List<(Fingerprint feature, bool value)>();
+				if (request.RBF is bool rbf)
+					known.Add((Fingerprint.RBF, rbf));
+				if (request.DiscourageFeeSniping is bool feeSnipping)
+					known.Add((Fingerprint.FeeSniping, feeSnipping));
+				if (request.LockTime is LockTime l)
+				{
+					if (l == LockTime.Zero)
+						known.Add((Fingerprint.TimelockZero, true));
+				}
+				if (request.Version is uint version)
+				{
+					if (version == 1)
+						known.Add((Fingerprint.V1, true));
+					if (version == 2)
+						known.Add((Fingerprint.V2, true));
+				}
+				known.Add((Fingerprint.SpendFromMixed, false));
+				known.Add((Fingerprint.SequenceMixed, false));
+				if (strategy is DirectDerivationStrategy direct)
+				{
+					if (direct.Segwit)
+						known.Add((Fingerprint.SpendFromP2WPKH, true));
+					else
+						known.Add((Fingerprint.SpendFromP2PKH, true));
+				}
+				else
+				{
+					// TODO: What if multisig? For now we consider it p2wpkh
+					known.Add((Fingerprint.SpendFromP2SHP2WPKH, true));
+				}
+
+				Fingerprint fingerprint = distribution.PickFingerprint(txBuilder.ShuffleRandom);
+				try
+				{
+					fingerprint = distribution.KnowingThat(known.ToArray())
+											  .PickFingerprint(txBuilder.ShuffleRandom);
+				}
+				catch(InvalidOperationException)
+				{
+
+				}
+
+				request.RBF ??= fingerprint.HasFlag(Fingerprint.RBF);
+				request.DiscourageFeeSniping ??= fingerprint.HasFlag(Fingerprint.FeeSniping);
+				if (request.LockTime is null && fingerprint.HasFlag(Fingerprint.TimelockZero))
+					request.LockTime = new LockTime(0);
+				if (request.Version is null && fingerprint.HasFlag(Fingerprint.V1))
+					request.Version = 1;
+				if (request.Version is null && fingerprint.HasFlag(Fingerprint.V2))
+					request.Version = 2;
+				suggestions.ShouldEnforceLowR = fingerprint.HasFlag(Fingerprint.LowR);
+			}
 
 			var waiter = Waiters.GetWaiter(network);
 			if (waiter.NetworkInfo?.GetRelayFee() is FeeRate feeRate)
@@ -43,7 +104,7 @@ namespace NBXplorer.Controllers
 				txBuilder.StandardTransactionPolicy.MinRelayTxFee = feeRate;
 			}
 
-			txBuilder.OptInRBF = request.RBF;
+			txBuilder.OptInRBF = !(request.RBF is false);
 			if (request.LockTime is LockTime lockTime)
 			{
 				txBuilder.SetLockTime(lockTime);
@@ -220,13 +281,15 @@ namespace NBXplorer.Controllers
 			{
 				DerivationScheme = strategy,
 				PSBT = psbt,
-				RebaseKeyPaths = request.RebaseKeyPaths
+				RebaseKeyPaths = request.RebaseKeyPaths,				
+				AlwaysIncludeNonWitnessUTXO = request.AlwaysIncludeNonWitnessUTXO
 			};
 			await UpdatePSBTCore(update, network);
 			var resp = new CreatePSBTResponse()
 			{
 				PSBT = update.PSBT,
-				ChangeAddress = hasChange ? change.ScriptPubKey.GetDestinationAddress(network.NBitcoinNetwork) : null
+				ChangeAddress = hasChange ? change.ScriptPubKey.GetDestinationAddress(network.NBitcoinNetwork) : null,
+				Suggestions = suggestions
 			};
 			return Json(resp, network.JsonSerializerSettings);
 		}
@@ -261,8 +324,12 @@ namespace NBXplorer.Controllers
 				await UpdateHDKeyPathsWitnessAndRedeem(update, repo);
 			}
 
-			foreach (var input in update.PSBT.Inputs)
-				input.TrySlimUTXO();
+			if (!update.AlwaysIncludeNonWitnessUTXO)
+			{
+				foreach (var input in update.PSBT.Inputs)
+					input.TrySlimUTXO();
+			}
+
 
 			HashSet<PubKey> rebased = new HashSet<PubKey>();
 			if (update.RebaseKeyPaths != null)
@@ -371,7 +438,7 @@ namespace NBXplorer.Controllers
 			{
 				AnnotatedTransactionCollection txs = null;
 				// First, we check for data in our history
-				foreach (var input in update.PSBT.Inputs.Where(NeedUTXO))
+				foreach (var input in update.PSBT.Inputs.Where(psbtInput => update.AlwaysIncludeNonWitnessUTXO || NeedUTXO(psbtInput)))
 				{
 					txs = txs ?? await GetAnnotatedTransactions(repo, ChainProvider.GetChain(repo.Network), new DerivationSchemeTrackedSource(derivationScheme));
 					if (txs.GetByTxId(input.PrevOut.Hash) is AnnotatedTransaction tx)
@@ -391,7 +458,7 @@ namespace NBXplorer.Controllers
 
 			// then, we search data in the saved transactions
 			await Task.WhenAll(update.PSBT.Inputs
-							.Where(NeedUTXO)
+							.Where(psbtInput => update.AlwaysIncludeNonWitnessUTXO || NeedUTXO(psbtInput))
 							.Select(async (input) =>
 							{
 								// If this is not segwit, or we are unsure of it, let's try to grab from our saved transactions
@@ -410,7 +477,7 @@ namespace NBXplorer.Controllers
 			{
 				var batch = rpc.RPC.PrepareBatch();
 				var getTransactions = Task.WhenAll(update.PSBT.Inputs
-					.Where(NeedUTXO)
+					.Where(psbtInput => update.AlwaysIncludeNonWitnessUTXO || NeedUTXO(psbtInput))
 					.Where(input => input.NonWitnessUtxo == null)
 					.Select(async input =>
 				   {

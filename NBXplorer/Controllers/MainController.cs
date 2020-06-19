@@ -21,6 +21,7 @@ using System.Net.WebSockets;
 using Newtonsoft.Json;
 using System.Collections.Concurrent;
 using System.Reflection;
+using NBXplorer.Analytics;
 
 namespace NBXplorer.Controllers
 {
@@ -39,7 +40,8 @@ namespace NBXplorer.Controllers
 			ScanUTXOSetServiceAccessor scanUTXOSetService,
 			RebroadcasterHostedService rebroadcaster,
 			KeyPathTemplates keyPathTemplates,
-			MvcNewtonsoftJsonOptions jsonOptions
+			MvcNewtonsoftJsonOptions jsonOptions,
+			Analytics.FingerprintHostedService fingerprintService
 			)
 		{
 			ExplorerConfiguration = explorerConfiguration;
@@ -51,10 +53,12 @@ namespace NBXplorer.Controllers
 			Waiters = waiters;
 			Rebroadcaster = rebroadcaster;
 			this.keyPathTemplates = keyPathTemplates;
+			this.fingerprintService = fingerprintService;
 			AddressPoolService = addressPoolService.Instance;
 		}
 		EventAggregator _EventAggregator;
 		private readonly KeyPathTemplates keyPathTemplates;
+		private readonly FingerprintHostedService fingerprintService;
 
 		public BitcoinDWaiters Waiters
 		{
@@ -425,7 +429,7 @@ namespace NBXplorer.Controllers
 		[Route("cryptos/{cryptoCode}/events")]
 		public async Task<JArray> GetEvents(string cryptoCode, int lastEventId = 0, int? limit = null, bool longPolling = false, CancellationToken cancellationToken = default)
 		{
-			if (limit != null && limit.Value < 0)
+			if (limit != null && limit.Value < 1)
 				throw new NBXplorerError(400, "invalid-limit", "limit should be more than 0").AsException();
 			var network = GetNetwork(cryptoCode, false);
 			TaskCompletionSource<bool> waitNextEvent = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -455,6 +459,18 @@ namespace NBXplorer.Controllers
 				}
 				return new JArray(result.Select(o => o.ToJObject(repo.Serializer.Settings)));
 			}
+		}
+
+
+		[Route("cryptos/{cryptoCode}/events/latest")]
+		public async Task<JArray> GetLatestEvents(string cryptoCode, int limit = 10)
+		{
+			if (limit < 1)
+				throw new NBXplorerError(400, "invalid-limit", "limit should be more than 0").AsException();
+			var network = GetNetwork(cryptoCode, false);
+			var repo = RepositoryProvider.GetRepository(network);
+			var result = await repo.GetLatestEvents(limit);
+			return new JArray(result.Select(o => o.ToJObject(repo.Serializer.Settings)));
 		}
 
 
@@ -612,7 +628,10 @@ namespace NBXplorer.Controllers
 						Confirmations = tx.Height.HasValue ? currentHeight - tx.Height.Value + 1 : 0,
 						Timestamp = tx.Record.FirstSeen,
 						Inputs = tx.Record.SpentOutpoints.Select(o => txs.GetUTXO(o)).Where(o => o != null).ToList(),
-						Outputs = tx.Record.GetReceivedOutputs().ToList()
+						Outputs = tx.Record.GetReceivedOutputs().ToList(),
+						Replaceable = tx.Replaceable,
+						ReplacedBy = tx.ReplacedBy,
+						Replacing = tx.Replacing
 					};
 
 					if (txId == null || txId == txInfo.TransactionId)
