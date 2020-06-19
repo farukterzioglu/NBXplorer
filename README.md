@@ -26,6 +26,7 @@ It has a bunch of feature:
 
 It currently supports the following altcoins:
 
+* Argoneum
 * BCash (also known as Bitcoin Cash)
 * BGold (also known as Bitcoin Gold)
 * Bitcoin
@@ -41,6 +42,7 @@ It currently supports the following altcoins:
 * Monacoin
 * Monoeci
 * Polis
+* Qtum
 * Terracoin
 * Ufo
 * Viacoin

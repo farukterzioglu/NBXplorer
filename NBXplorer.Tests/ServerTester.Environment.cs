@@ -11,6 +11,10 @@ namespace NBXplorer.Tests
 		NBXplorerNetworkProvider _Provider = new NBXplorerNetworkProvider(NetworkType.Regtest);
 		private void SetEnvironment()
 		{
+			//CryptoCode = "AGM";
+			//nodeDownloadData = NodeDownloadData.Argoneum.v1_4_1;
+			//Network = NBitcoin.Altcoins.Argoneum.Instance.Regtest;
+
 			//CryptoCode = "LTC";
 			//nodeDownloadData = NodeDownloadData.Litecoin.v0_16_3;
 			//Network = NBitcoin.Altcoins.Litecoin.Instance.Regtest;
@@ -79,6 +83,10 @@ namespace NBXplorer.Tests
 			//nodeDownloadData = NodeDownloadData.Colossus.v1_1_1;
 			//Network = NBitcoin.Altcoins.Colossus.Instance.Regtest;
 			//RPCSupportSegwit = false;
+
+			//CryptoCode = "QTUM";
+			//nodeDownloadData = NodeDownloadData.Qtum.v0_18_3;
+			//NBXplorerNetwork = _Provider.GetQTUM();
 
 			//CryptoCode = "LBTC";
 			//nodeDownloadData = NodeDownloadData.Elements.v0_18_1_1;
